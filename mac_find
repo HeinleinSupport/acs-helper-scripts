@@ -1,0 +1,86 @@
+#!/bin/bash
+#
+# mac_find [mac_address [...]]
+# ip_find [ipv4_address [...]]
+#
+# called as mac_find, results all relevant informations from ACS
+#  regarding the given mac addresses.
+#
+# called as ip_find, results all relevant informations from ACS
+#  regarding the given IPv4 addresses.
+#
+#
+# $0 is small script to search for mac- and ipv4-addresses in acs'
+#  mysql cloud-db.
+#
+# Stephan Seitz <s.seitz@heinlein-support.de>
+# Melanie Desaive <m.desaive@heinlein-support.de>
+#
+# Copyright 2016 Heinlein Supprt GmbH
+# GPL v2
+#
+# Installation:
+# 1. find a desired location, e.g.
+# /usr/local/bin/mac_find
+# ln -s /usr/local/bin/mac_find /usr/local/bin/ip_find
+#
+# 2. modify the last line of this script and add mysql hostname, user and password
+#   OR (the better way)
+#    create a ~/.my.cnf with mysql credentials and chmod 0400 it.
+#
+
+if [ "_$(basename $0)" == "_mac_find" ]
+then
+	parameter_label="mac_address"
+	search_column="nics.mac_address"
+else
+	parameter_label="ipv4_address"
+	search_column="nics.ip4_address"
+fi
+
+
+if [ $# -lt 1 ]
+then
+	echo "$0 [${parameter_label} [...]]" > /dev/stderr
+	echo "  find and output the matching ${parameter_label}(es)." > /dev/stderr
+	echo "$0 -a" > /dev/stderr
+	echo "  find and output all ${parameter_label}(es)." > /dev/stderr
+	exit 1
+fi
+
+if [ "_$1" == "_-a" ]
+then
+	showall=1
+	first_query=""
+	first_query_sfx=""
+else
+	showall=0
+	first_query=" and ( lower(${search_column})=lower(\"${1}\")"
+	first_query_sfx=" )"
+fi
+
+query="select domain.name as Domain, \
+	account.account_name as Account_or_Project, \
+	vm_instance.name as Instance, \
+	mac_address as Interface_MAC_Address, \
+	ip4_address as Interface_IPv4, \
+	instance_id as Instance_ID, \
+	vm_instance.uuid as Instance_UUID from nics \
+		left join vm_instance on nics.instance_id = vm_instance.id \
+		left join domain on vm_instance.domain_id = domain.id \
+		left join account on vm_instance.account_id = account.id \
+			where vm_instance.removed is null ${first_query}"
+
+if [ $showall -eq 0 ]
+then
+	shift
+	for mac_address in $@
+	do
+		query+=" or lower(${search_column})=lower(\"${1}\")"
+	done
+fi
+query+="${first_query_sfx} order by Domain, Account_or_Project, Instance, ${search_column} asc;"
+
+echo $query | \
+	mysql -t cloud
+
